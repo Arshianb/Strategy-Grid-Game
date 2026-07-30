@@ -16,22 +16,64 @@
   canvas { touch-action: none; display: block; max-width: 100%; background: #1e293b; }
   .glass { background: rgba(30,41,59,0.55); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .btn-press:active { transform: scale(0.94); }
-  #chatbox { height: 160px; overflow-y: auto; }
+
+  /* Chat modal */
+  #chatModal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    align-items: flex-end;
+    justify-content: center;
+    background: rgba(0,0,0,0.45);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #chatModal.open { display: flex; }
+  #chatPanel {
+    width: 100%;
+    max-width: 600px;
+    border-radius: 1.25rem 1.25rem 0 0;
+    background: #1e293b;
+    border: 1px solid rgba(148,163,184,0.15);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 60dvh;
+  }
+  #chatbox {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-height: 0;
+  }
+  .chat-msg-red   { color: #f87171; }
+  .chat-msg-blue  { color: #60a5fa; }
+  .chat-msg-sys   { color: #94a3b8; }
 </style>
 </head>
-<body class="flex flex-col items-center min-h-[100dvh] gap-4 px-3 py-4">
+<body class="flex flex-col items-center min-h-[100dvh] gap-3 px-3 py-4">
 
-<div class="w-full max-w-2xl flex flex-col items-center gap-2 text-center">
-  <h1 class="text-xl font-bold text-white tracking-tight flex items-center gap-2"><span>🎮</span> Strategy Grid Game</h1>
-  <div id="status" class="px-4 py-1.5 rounded-full text-sm font-medium glass text-slate-300 transition-all">Connecting...</div>
+<!-- Header -->
+<div class="w-full max-w-2xl flex flex-col items-center gap-1 text-center">
+  <h1 class="text-xl font-bold text-white tracking-tight flex items-center gap-2">🎮 Strategy Grid Game</h1>
+  <div id="status" class="px-4 py-1.5 rounded-full text-sm font-medium glass text-slate-300">Connecting...</div>
   <p id="mycolor" class="text-sm font-semibold"></p>
 </div>
 
+<!-- Mode buttons -->
 <div class="flex gap-3 w-full max-w-2xl">
   <button id="btnMove" class="btn-press flex-1 py-3 rounded-2xl bg-blue-600 text-white text-base font-semibold shadow-lg shadow-blue-900/30 transition flex items-center justify-center gap-2" onclick="setMode('move')">🚶 Move</button>
   <button id="btnWall" class="btn-press flex-1 py-3 rounded-2xl bg-slate-700 text-white text-base font-semibold shadow-lg shadow-slate-900/30 transition flex items-center justify-center gap-2" onclick="setMode('wall')">🧱 Wall</button>
+  <button onclick="openChat()" class="btn-press px-4 py-3 rounded-2xl bg-slate-700 text-white text-base font-semibold shadow-lg transition flex items-center justify-center gap-1 relative">
+    💬
+    <span id="chatBadge" class="hidden absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white font-bold"></span>
+  </button>
 </div>
 
+<!-- Wall controls -->
 <div id="wallControls" class="hidden gap-3 w-full max-w-2xl">
   <button id="btnEndWall" onclick="endWallTurn()"
     class="btn-press flex-1 py-2 rounded-2xl bg-green-700 hover:bg-green-600 text-white text-sm font-semibold transition flex items-center justify-center gap-1">
@@ -42,24 +84,29 @@
     ✖ Cancel
   </button>
 </div>
-
 <div id="wallInfo" class="hidden text-amber-300 text-xs text-center"></div>
 
+<!-- Canvas -->
 <div class="rounded-2xl glass shadow-2xl overflow-hidden">
   <canvas id="board" class="rounded-xl cursor-pointer"></canvas>
 </div>
 
 <p id="errmsg" class="text-red-400 text-sm h-5 text-center font-medium"></p>
 
-<!-- Chat -->
-<div class="glass rounded-2xl p-3 w-full max-w-2xl flex flex-col gap-2">
-  <p class="text-slate-400 text-xs font-semibold">💬 Chat</p>
-  <div id="chatbox" class="flex flex-col gap-1 text-sm"></div>
-  <div class="flex gap-2">
-    <input id="chatInput" type="text" maxlength="200" placeholder="Type a message..."
-      class="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-white text-sm outline-none border border-slate-700"
-      onkeydown="if(event.key==='Enter') sendChat()">
-    <button onclick="sendChat()" class="btn-press px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition">Send</button>
+<!-- Chat Modal -->
+<div id="chatModal" onclick="handleModalBg(event)">
+  <div id="chatPanel">
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-slate-300 text-sm font-semibold">💬 Chat</span>
+      <button onclick="closeChat()" class="btn-press text-slate-400 hover:text-white text-xl leading-none px-1">✕</button>
+    </div>
+    <div id="chatbox"></div>
+    <div class="flex gap-2 pt-1">
+      <input id="chatInput" type="text" maxlength="200" placeholder="Type a message..."
+        class="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-white text-sm outline-none border border-slate-700"
+        onkeydown="if(event.key==='Enter') sendChat()">
+      <button onclick="sendChat()" class="btn-press px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition">Send</button>
+    </div>
   </div>
 </div>
 
@@ -73,12 +120,12 @@ let rows = 9, cols = 9, maxWalls = 1;
 let mode = "move", hints = [];
 let CELL = 52, PAD = 20;
 let ws = null;
+let unreadChat = 0, chatOpen = false;
 
 function computeCell() {
   const maxW = Math.min(window.innerWidth - 24, 600);
   CELL = Math.max(28, Math.floor((maxW - PAD * 2) / Math.max(rows, cols)));
 }
-
 function resize() {
   computeCell();
   canvas.width  = PAD * 2 + CELL * cols;
@@ -88,6 +135,36 @@ function resize() {
   draw();
 }
 window.addEventListener("resize", resize);
+
+function openChat() {
+  chatOpen = true;
+  unreadChat = 0;
+  updateBadge();
+  document.getElementById("chatModal").classList.add("open");
+  setTimeout(() => {
+    const box = document.getElementById("chatbox");
+    box.scrollTop = box.scrollHeight;
+    document.getElementById("chatInput").focus();
+  }, 50);
+}
+function closeChat() {
+  chatOpen = false;
+  document.getElementById("chatModal").classList.remove("open");
+}
+function handleModalBg(e) {
+  if (e.target === document.getElementById("chatModal")) closeChat();
+}
+function updateBadge() {
+  const badge = document.getElementById("chatBadge");
+  if (unreadChat > 0 && !chatOpen) {
+    badge.textContent = unreadChat > 9 ? "9+" : unreadChat;
+    badge.classList.remove("hidden");
+    badge.classList.add("flex");
+  } else {
+    badge.classList.add("hidden");
+    badge.classList.remove("flex");
+  }
+}
 
 function setMode(m) {
   mode = m;
@@ -127,11 +204,9 @@ function updateWallControls() {
 function cellCenter(r, c) {
   return [PAD + c * CELL + CELL / 2, PAD + r * CELL + CELL / 2];
 }
-
 function wallKey(a, b) {
   return JSON.stringify([a, b].map(x => x.join(",")).sort());
 }
-
 function getAllWallEdges() {
   if (!state) return [];
   const allWalls = new Set([
@@ -154,7 +229,6 @@ function getAllWallEdges() {
   }
   return result;
 }
-
 function getMoveHints(pos) {
   const {row: r, col: c} = pos;
   const wallSet = new Set(state.walls.map(w => wallKey([w.r1,w.c1],[w.r2,w.c2])));
@@ -176,7 +250,6 @@ function draw() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!state) return;
 
-  // Grid
   ctx.strokeStyle = "#334155"; ctx.lineWidth = 1;
   for (let i = 0; i <= cols; i++) {
     const x = PAD + i * CELL;
@@ -187,7 +260,6 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(PAD + cols * CELL, y); ctx.stroke();
   }
 
-  // Goal rows
   for (const [color, goalRow] of Object.entries(state.goals)) {
     ctx.fillStyle = color === "red" ? "rgba(239,68,68,0.12)" : "rgba(59,130,246,0.12)";
     ctx.fillRect(PAD, PAD + goalRow * CELL, cols * CELL, CELL);
@@ -197,13 +269,10 @@ function draw() {
     ctx.fillText(color === "red" ? "🔴 Goal" : "🔵 Goal", PAD + cols * CELL / 2, PAD + goalRow * CELL + CELL / 2 + 4);
   }
 
-  // Move hints
   if (mode === "move") {
     ctx.fillStyle = "rgba(96,165,250,0.35)";
     for (const [r,c] of hints) ctx.fillRect(PAD+c*CELL+3, PAD+r*CELL+3, CELL-6, CELL-6);
   }
-
-  // Wall hints
   if (mode === "wall") {
     for (const [[r1,c1],[r2,c2]] of hints) {
       const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
@@ -214,7 +283,6 @@ function draw() {
     }
   }
 
-  // Pending walls
   for (const [r1,c1,r2,c2] of (state.pending_walls || [])) {
     const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
     const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.45, dy=(x2-x1)*0.45;
@@ -225,7 +293,6 @@ function draw() {
     ctx.setLineDash([]);
   }
 
-  // Permanent walls (colored by owner)
   ctx.lineWidth = Math.max(4, CELL*0.1); ctx.lineCap = "round";
   for (const w of state.walls) {
     const [x1,y1] = cellCenter(w.r1,w.c1), [x2,y2] = cellCenter(w.r2,w.c2);
@@ -234,7 +301,6 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
   }
 
-  // Players
   for (const [color, pos] of Object.entries(state.players)) {
     const [x,y] = cellCenter(pos.row, pos.col);
     ctx.beginPath(); ctx.arc(x,y,CELL*0.33,0,Math.PI*2);
@@ -274,13 +340,25 @@ function applyState(s) {
   refreshHints(); updateStatus(); updateWallControls(); resize();
 }
 
+function senderLabel(msg) {
+  const color = msg.color || msg.sender || "";
+  if (color.includes("red"))  return { label: "Red Player",  cls: "chat-msg-red" };
+  if (color.includes("blue")) return { label: "Blue Player", cls: "chat-msg-blue" };
+  return { label: color || "?", cls: "chat-msg-sys" };
+}
+
 function appendChat(msg) {
   const box = document.getElementById("chatbox");
+  const { label, cls } = senderLabel(msg);
   const div = document.createElement("div");
-  div.className = `px-2 py-1 rounded text-xs ${msg.sender.endsWith("_2") ? "text-blue-300" : "text-red-300"}`;
-  div.textContent = `${msg.sender}: ${msg.text}`;
+  div.className = `px-2 py-1 rounded text-xs ${cls}`;
+  div.textContent = `${label}: ${msg.text}`;
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
+  if (!chatOpen) {
+    unreadChat++;
+    updateBadge();
+  }
 }
 
 function sendChat() {
@@ -319,15 +397,14 @@ function send(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
 }
 
-function endWallTurn()   { send({ action: "end_wall_turn" }); }
-function cancelWallTurn(){ send({ action: "cancel_wall_turn" }); }
+function endWallTurn()    { send({ action: "end_wall_turn" }); }
+function cancelWallTurn() { send({ action: "cancel_wall_turn" }); }
 
 canvas.addEventListener("click", (ev) => {
   if (!state || !myColor || state.winner || state.turn !== myColor) return;
   const rect = canvas.getBoundingClientRect();
   const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
   const y = (ev.clientY - rect.top)  * (canvas.height / rect.height);
-
   if (mode === "move") {
     const c = Math.floor((x - PAD) / CELL);
     const r = Math.floor((y - PAD) / CELL);

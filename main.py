@@ -166,7 +166,7 @@ async def ws_endpoint(websocket: WebSocket, session_id: str):
             if action == "chat":
                 text = str(data.get("text", "")).strip()[:200]
                 if text:
-                    msg = {"sender": s["username"], "text": text}
+                    msg = {"sender": s["username"], "color": color, "text": text}
                     game.chat.append(msg)
                     await broadcast({"type": "chat", "msg": msg})
                 continue
