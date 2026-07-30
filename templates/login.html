@@ -1,54 +1,69 @@
-<!-- templates/login.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Strategy Game - Login</title>
+<title>Login</title>
 <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
-<div class="bg-slate-700 rounded-2xl shadow-2xl p-8 w-full max-w-sm">
-  <h1 class="text-2xl font-bold text-white text-center mb-6">🎮 Strategy Game</h1>
-  {% if error %}
-  <div class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4 text-sm">{{ error }}</div>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+<div class="bg-gray-800 p-8 rounded-xl shadow-lg w-full max-w-md">
+  <h1 class="text-2xl font-bold mb-6 text-center">Wall Game</h1>
+
+  {% if player1_link %}
+  <div class="mb-6 space-y-3">
+    <p class="text-green-400 font-semibold text-center">Game created!</p>
+    <div class="bg-gray-700 p-3 rounded">
+      <p class="text-sm text-gray-400 mb-1">Player 1 (Red)</p>
+      <a href="{{ player1_link }}" class="text-red-400 break-all hover:underline">{{ request.url.scheme }}://{{ request.url.netloc }}{{ player1_link }}</a>
+    </div>
+    <div class="bg-gray-700 p-3 rounded">
+      <p class="text-sm text-gray-400 mb-1">Player 2 (Blue)</p>
+      <a href="{{ player2_link }}" class="text-blue-400 break-all hover:underline">{{ request.url.scheme }}://{{ request.url.netloc }}{{ player2_link }}</a>
+    </div>
+  </div>
   {% endif %}
-  <form method="post" action="/login" class="space-y-4">
+
+  {% if error %}
+  <p class="text-red-400 text-sm mb-4 text-center">{{ error }}</p>
+  {% endif %}
+
+  <form method="POST" action="/login" class="space-y-4">
     <div>
-      <label class="block text-slate-300 text-sm mb-1">Username</label>
-      <input name="username" required
-        class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <label class="block text-sm text-gray-400 mb-1">Username</label>
+      <input name="username" type="text" required class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
     </div>
     <div>
-      <label class="block text-slate-300 text-sm mb-1">Password</label>
-      <input name="password" type="password" required
-        class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <label class="block text-sm text-gray-400 mb-1">Password</label>
+      <input name="password" type="password" required class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
     </div>
-    <div class="flex gap-3">
-      <div class="flex-1">
-        <label class="block text-slate-300 text-sm mb-1">Rows (5–15)</label>
-        <input name="grid_rows" type="number" value="9" min="5" max="15"
-          class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Rows</label>
+        <input name="rows" type="number" value="9" min="5" max="15" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
-      <div class="flex-1">
-        <label class="block text-slate-300 text-sm mb-1">Cols (5–15)</label>
-        <input name="grid_cols" type="number" value="9" min="5" max="15"
-          class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Cols</label>
+        <input name="cols" type="number" value="9" min="5" max="15" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-1">Walls/Turn</label>
+        <input name="max_walls" type="number" value="1" min="1" max="5" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
     </div>
     <div>
-      <label class="block text-slate-300 text-sm mb-1">Walls per turn</label>
-      <select name="max_walls"
-        class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <option value="1">1 wall</option>
-        <option value="2" selected>2 walls</option>
-        <option value="3">3 walls</option>
-      </select>
+      <label class="block text-sm text-gray-400 mb-2">Game Mode</label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="flex items-center gap-2 bg-gray-700 rounded p-3 cursor-pointer hover:bg-gray-600">
+          <input type="radio" name="game_mode" value="opposite" checked class="accent-blue-500">
+          <span class="text-sm">Opposite Sides</span>
+        </label>
+        <label class="flex items-center gap-2 bg-gray-700 rounded p-3 cursor-pointer hover:bg-gray-600">
+          <input type="radio" name="game_mode" value="same" class="accent-blue-500">
+          <span class="text-sm">Same Side</span>
+        </label>
+      </div>
     </div>
-    <button type="submit"
-      class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg py-2 transition">
-      Login &amp; Create Game
-    </button>
+    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 rounded py-2 font-semibold transition">Create Game</button>
   </form>
 </div>
 </body>

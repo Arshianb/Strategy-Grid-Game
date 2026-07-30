@@ -1,4 +1,3 @@
-<!-- templates/game.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,6 +16,7 @@
   canvas { touch-action: none; display: block; max-width: 100%; background: #1e293b; }
   .glass { background: rgba(30,41,59,0.55); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .btn-press:active { transform: scale(0.94); }
+  #chatbox { height: 160px; overflow-y: auto; }
 </style>
 </head>
 <body class="flex flex-col items-center min-h-[100dvh] gap-4 px-3 py-4">
@@ -26,27 +26,6 @@
   <div id="status" class="px-4 py-1.5 rounded-full text-sm font-medium glass text-slate-300 transition-all">Connecting...</div>
   <p id="mycolor" class="text-sm font-semibold"></p>
 </div>
-
-{% if is_creator %}
-<div class="glass rounded-2xl p-3 w-full max-w-2xl flex flex-col gap-2">
-  {% if player1_link %}
-  <p class="text-slate-300 text-xs">🔴 Your rejoin link (Player 1)</p>
-  <div class="flex gap-2 items-center">
-    <input id="p1link" readonly value="{{ request.url.scheme }}://{{ request.url.netloc }}{{ player1_link }}"
-      class="bg-slate-800/80 text-slate-200 text-xs rounded-lg px-3 py-2 flex-1 min-w-0 outline-none border border-slate-700"/>
-    <button onclick="copyLink('p1link',this)" class="btn-press px-3 py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">Copy</button>
-  </div>
-  {% endif %}
-  {% if player2_link %}
-  <p class="text-slate-300 text-xs">🔵 Share with Player 2</p>
-  <div class="flex gap-2 items-center">
-    <input id="p2link" readonly value="{{ request.url.scheme }}://{{ request.url.netloc }}{{ player2_link }}"
-      class="bg-slate-800/80 text-slate-200 text-xs rounded-lg px-3 py-2 flex-1 min-w-0 outline-none border border-slate-700"/>
-    <button onclick="copyLink('p2link',this)" class="btn-press px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition whitespace-nowrap">Copy</button>
-  </div>
-  {% endif %}
-</div>
-{% endif %}
 
 <div class="flex gap-3 w-full max-w-2xl">
   <button id="btnMove" class="btn-press flex-1 py-3 rounded-2xl bg-blue-600 text-white text-base font-semibold shadow-lg shadow-blue-900/30 transition flex items-center justify-center gap-2" onclick="setMode('move')">🚶 Move</button>
@@ -72,8 +51,16 @@
 
 <p id="errmsg" class="text-red-400 text-sm h-5 text-center font-medium"></p>
 
-<div class="text-slate-500 text-xs text-center max-w-xs px-2 pb-2">
-  🔴 Player 1 = Red &nbsp;|&nbsp; 🔵 Player 2 = Blue &nbsp;|&nbsp; Goal: reach row 0
+<!-- Chat -->
+<div class="glass rounded-2xl p-3 w-full max-w-2xl flex flex-col gap-2">
+  <p class="text-slate-400 text-xs font-semibold">💬 Chat</p>
+  <div id="chatbox" class="flex flex-col gap-1 text-sm"></div>
+  <div class="flex gap-2">
+    <input id="chatInput" type="text" maxlength="200" placeholder="Type a message..."
+      class="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-white text-sm outline-none border border-slate-700"
+      onkeydown="if(event.key==='Enter') sendChat()">
+    <button onclick="sendChat()" class="btn-press px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg transition">Send</button>
+  </div>
 </div>
 
 <script>
@@ -81,47 +68,15 @@ const SESSION_ID = "{{ session_id }}";
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 
-let state = null;
-let myColor = null;
-let rows = 9, cols = 9, maxWalls = 2;
-let mode = "move";
-let hints = [];
+let state = null, myColor = null;
+let rows = 9, cols = 9, maxWalls = 1;
+let mode = "move", hints = [];
 let CELL = 52, PAD = 20;
 let ws = null;
 
-function copyLink(inputId, btn) {
-  const input = document.getElementById(inputId);
-  input.focus();
-  input.select();
-  input.setSelectionRange(0, 99999); // for mobile
-
-  let ok = false;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(input.value);
-      ok = true;
-    } else {
-      ok = document.execCommand("copy");
-    }
-  } catch (e) {
-    ok = false;
-  }
-
-  window.getSelection().removeAllRanges();
-
-  const orig = btn.textContent;
-  btn.textContent = ok ? "Copied!" : "Copy failed";
-  btn.classList.add(ok ? "bg-green-600" : "bg-red-800");
-  setTimeout(() => {
-    btn.textContent = orig;
-    btn.classList.remove("bg-green-600", "bg-red-800");
-  }, 1500);
-}
-
 function computeCell() {
   const maxW = Math.min(window.innerWidth - 24, 600);
-  CELL = Math.floor((maxW - PAD * 2) / Math.max(rows, cols));
-  if (CELL < 28) CELL = 28;
+  CELL = Math.max(28, Math.floor((maxW - PAD * 2) / Math.max(rows, cols)));
 }
 
 function resize() {
@@ -147,37 +102,26 @@ function setMode(m) {
 
 function refreshHints() {
   if (!state || !myColor) { hints = []; return; }
-  if (mode === "wall") hints = getAllWallEdges();
-  else hints = getMoveHints(state.players[myColor]);
+  hints = mode === "wall" ? getAllWallEdges() : getMoveHints(state.players[myColor]);
 }
 
 function updateWallControls() {
   const wallCtrl = document.getElementById("wallControls");
   const wallInfo = document.getElementById("wallInfo");
-  if (!state) { wallCtrl.classList.add("hidden"); wallInfo.classList.add("hidden"); return; }
-
-  const isMyTurn = state.turn === myColor;
-  const inWallMode = mode === "wall";
-  const hasPending = state.pending_walls && state.pending_walls.length > 0;
-
-  if (inWallMode && isMyTurn) {
-    wallCtrl.classList.remove("hidden");
-    wallCtrl.classList.add("flex");
-    const btn = document.getElementById("btnEndWall");
-    btn.disabled = !hasPending;
-    btn.classList.toggle("opacity-40", !hasPending);
-
-    wallInfo.classList.remove("hidden");
-    const placed = hasPending ? state.pending_walls.length : 0;
-    const dir = state.pending_direction;
-    wallInfo.textContent = dir
-      ? `Placed ${placed}/${maxWalls} walls (${dir === "H" ? "horizontal" : "vertical"}) — must continue same direction`
-      : `Place up to ${maxWalls} wall${maxWalls > 1 ? "s" : ""} in one direction`;
-  } else {
-    wallCtrl.classList.add("hidden");
-    wallCtrl.classList.remove("flex");
-    wallInfo.classList.add("hidden");
+  if (!state || mode !== "wall" || state.turn !== myColor) {
+    wallCtrl.classList.add("hidden"); wallCtrl.classList.remove("flex");
+    wallInfo.classList.add("hidden"); return;
   }
+  wallCtrl.classList.remove("hidden"); wallCtrl.classList.add("flex");
+  const hasPending = state.pending_walls && state.pending_walls.length > 0;
+  const btn = document.getElementById("btnEndWall");
+  btn.disabled = !hasPending;
+  btn.classList.toggle("opacity-40", !hasPending);
+  wallInfo.classList.remove("hidden");
+  const dir = state.pending_direction;
+  wallInfo.textContent = dir
+    ? `Placed ${state.pending_walls.length}/${maxWalls} walls (${dir === "h" ? "horizontal" : "vertical"}) — must continue same direction`
+    : `Place up to ${maxWalls} wall${maxWalls > 1 ? "s" : ""} in one direction`;
 }
 
 function cellCenter(r, c) {
@@ -191,23 +135,20 @@ function wallKey(a, b) {
 function getAllWallEdges() {
   if (!state) return [];
   const allWalls = new Set([
-    ...state.walls.map(w => wallKey(w[0], w[1])),
-    ...(state.pending_walls || []).map(w => wallKey(w[0], w[1]))
+    ...state.walls.map(w => wallKey([w.r1, w.c1], [w.r2, w.c2])),
+    ...(state.pending_walls || []).map(w => wallKey([w[0], w[1]], [w[2], w[3]]))
   ]);
   const result = [], seen = new Set();
   const pendingDir = state.pending_direction;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      for (const [dr, dc] of [[1, 0], [0, 1]]) {
-        const nr = r + dr, nc = c + dc;
+      for (const [dr, dc] of [[1,0],[0,1]]) {
+        const nr = r+dr, nc = c+dc;
         if (nr >= rows || nc >= cols) continue;
-        const dir = dr === 1 ? "V" : "H";
+        const dir = dr === 1 ? "h" : "v";
         if (pendingDir && dir !== pendingDir) continue;
-        const key = wallKey([r, c], [nr, nc]);
-        if (!allWalls.has(key) && !seen.has(key)) {
-          seen.add(key);
-          result.push([[r, c], [nr, nc]]);
-        }
+        const key = wallKey([r,c],[nr,nc]);
+        if (!allWalls.has(key) && !seen.has(key)) { seen.add(key); result.push([[r,c],[nr,nc]]); }
       }
     }
   }
@@ -215,16 +156,19 @@ function getAllWallEdges() {
 }
 
 function getMoveHints(pos) {
-  const [r, c] = pos;
-  const wallSet = new Set(state.walls.map(w => wallKey(w[0], w[1])));
+  const {row: r, col: c} = pos;
+  const wallSet = new Set(state.walls.map(w => wallKey([w.r1,w.c1],[w.r2,w.c2])));
   const result = [];
-  for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-    const nr = r + dr, nc = c + dc;
-    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-    if (!wallSet.has(wallKey([r, c], [nr, nc]))) result.push([nr, nc]);
+  for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+    const nr=r+dr, nc=c+dc;
+    if (nr<0||nr>=rows||nc<0||nc>=cols) continue;
+    if (!wallSet.has(wallKey([r,c],[nr,nc]))) result.push([nr,nc]);
   }
   return result;
 }
+
+const WALL_COLORS = { red: "#c0392b", blue: "#2980b9" };
+const PLAYER_COLORS = { red: "#ef4444", blue: "#3b82f6" };
 
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -232,6 +176,7 @@ function draw() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   if (!state) return;
 
+  // Grid
   ctx.strokeStyle = "#334155"; ctx.lineWidth = 1;
   for (let i = 0; i <= cols; i++) {
     const x = PAD + i * CELL;
@@ -242,84 +187,62 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(PAD + cols * CELL, y); ctx.stroke();
   }
 
-  ctx.fillStyle = "rgba(250,204,21,0.08)";
-  ctx.fillRect(PAD, PAD, cols * CELL, CELL);
-  ctx.fillStyle = "#fbbf24";
-  ctx.font = `${Math.max(10, CELL * 0.22)}px sans-serif`;
-  ctx.textAlign = "center";
-  ctx.fillText("🏁 Goal", PAD + cols * CELL / 2, PAD + CELL / 2 + 4);
+  // Goal rows
+  for (const [color, goalRow] of Object.entries(state.goals)) {
+    ctx.fillStyle = color === "red" ? "rgba(239,68,68,0.12)" : "rgba(59,130,246,0.12)";
+    ctx.fillRect(PAD, PAD + goalRow * CELL, cols * CELL, CELL);
+    ctx.fillStyle = color === "red" ? "#ef4444" : "#3b82f6";
+    ctx.font = `${Math.max(10, CELL * 0.22)}px sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(color === "red" ? "🔴 Goal" : "🔵 Goal", PAD + cols * CELL / 2, PAD + goalRow * CELL + CELL / 2 + 4);
+  }
 
+  // Move hints
   if (mode === "move") {
     ctx.fillStyle = "rgba(96,165,250,0.35)";
-    for (const [r, c] of hints) {
-      ctx.fillRect(PAD + c * CELL + 3, PAD + r * CELL + 3, CELL - 6, CELL - 6);
-    }
+    for (const [r,c] of hints) ctx.fillRect(PAD+c*CELL+3, PAD+r*CELL+3, CELL-6, CELL-6);
   }
 
+  // Wall hints
   if (mode === "wall") {
-    for (const [[r1, c1], [r2, c2]] of hints) {
-      const [x1, y1] = cellCenter(r1, c1);
-      const [x2, y2] = cellCenter(r2, c2);
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-      const dx = (y2 - y1) * 0.4, dy = (x2 - x1) * 0.4;
+    for (const [[r1,c1],[r2,c2]] of hints) {
+      const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
+      const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.4, dy=(x2-x1)*0.4;
       ctx.strokeStyle = "rgba(251,191,36,0.28)";
-      ctx.lineWidth = Math.max(4, CELL * 0.12);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(mx - dx, my - dy);
-      ctx.lineTo(mx + dx, my + dy);
-      ctx.stroke();
+      ctx.lineWidth = Math.max(4, CELL*0.12); ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
     }
   }
 
-  if (state.pending_walls) {
-    for (const [[r1, c1], [r2, c2]] of state.pending_walls) {
-      const [x1, y1] = cellCenter(r1, c1);
-      const [x2, y2] = cellCenter(r2, c2);
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-      const dx = (y2 - y1) * 0.45, dy = (x2 - x1) * 0.45;
-      ctx.strokeStyle = "rgba(251,191,36,0.75)";
-      ctx.lineWidth = Math.max(4, CELL * 0.1);
-      ctx.lineCap = "round";
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(mx - dx, my - dy);
-      ctx.lineTo(mx + dx, my + dy);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+  // Pending walls
+  for (const [r1,c1,r2,c2] of (state.pending_walls || [])) {
+    const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
+    const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.45, dy=(x2-x1)*0.45;
+    ctx.strokeStyle = "rgba(251,191,36,0.75)";
+    ctx.lineWidth = Math.max(4, CELL*0.1); ctx.lineCap = "round";
+    ctx.setLineDash([6,4]);
+    ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
+    ctx.setLineDash([]);
   }
 
-  ctx.strokeStyle = "#f59e0b";
-  ctx.lineWidth = Math.max(4, CELL * 0.1);
-  ctx.lineCap = "round";
-  for (const [[r1, c1], [r2, c2]] of state.walls) {
-    const [x1, y1] = cellCenter(r1, c1);
-    const [x2, y2] = cellCenter(r2, c2);
-    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-    const dx = (y2 - y1) * 0.45, dy = (x2 - x1) * 0.45;
-    ctx.beginPath();
-    ctx.moveTo(mx - dx, my - dy);
-    ctx.lineTo(mx + dx, my + dy);
-    ctx.stroke();
+  // Permanent walls (colored by owner)
+  ctx.lineWidth = Math.max(4, CELL*0.1); ctx.lineCap = "round";
+  for (const w of state.walls) {
+    const [x1,y1] = cellCenter(w.r1,w.c1), [x2,y2] = cellCenter(w.r2,w.c2);
+    const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.45, dy=(x2-x1)*0.45;
+    ctx.strokeStyle = WALL_COLORS[w.owner] || "#f59e0b";
+    ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
   }
 
+  // Players
   for (const [color, pos] of Object.entries(state.players)) {
-    const [r, c] = pos;
-    const [x, y] = cellCenter(r, c);
-    ctx.beginPath();
-    ctx.arc(x, y, CELL * 0.33, 0, Math.PI * 2);
-    ctx.fillStyle = color === "red" ? "#ef4444" : "#3b82f6";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#0f172a";
-    ctx.stroke();
+    const [x,y] = cellCenter(pos.row, pos.col);
+    ctx.beginPath(); ctx.arc(x,y,CELL*0.33,0,Math.PI*2);
+    ctx.fillStyle = PLAYER_COLORS[color]; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = "#0f172a"; ctx.stroke();
     if (state.turn === color && !state.winner) {
-      ctx.beginPath();
-      ctx.arc(x, y, CELL * 0.42, 0, Math.PI * 2);
-      ctx.strokeStyle = "#4ade80";
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(x,y,CELL*0.42,0,Math.PI*2);
+      ctx.strokeStyle = "#4ade80"; ctx.lineWidth = 2; ctx.stroke();
     }
   }
 }
@@ -329,12 +252,10 @@ function updateStatus() {
   const colorEl = document.getElementById("mycolor");
   colorEl.textContent = myColor ? `You are ${myColor === "red" ? "🔴 Red" : "🔵 Blue"}` : "";
   colorEl.className = `text-sm font-semibold ${myColor === "red" ? "text-red-400" : "text-blue-400"}`;
-
   if (!state) { statusEl.textContent = "Connecting..."; return; }
   if (state.winner) {
     statusEl.textContent = `🏆 ${state.winner === "red" ? "Red" : "Blue"} wins!`;
-    statusEl.className = "px-4 py-1.5 rounded-full text-sm font-bold glass text-amber-300";
-    return;
+    statusEl.className = "px-4 py-1.5 rounded-full text-sm font-bold glass text-amber-300"; return;
   }
   const isMyTurn = state.turn === myColor;
   statusEl.textContent = isMyTurn ? "Your turn" : `Waiting for ${state.turn === "red" ? "Red" : "Blue"}`;
@@ -349,80 +270,79 @@ function showError(msg) {
 
 function applyState(s) {
   state = s;
-  rows = state.rows; cols = state.cols; maxWalls = state.max_walls;
-  refreshHints();
-  updateStatus();
-  updateWallControls();
-  resize();
+  rows = s.rows; cols = s.cols; maxWalls = s.max_walls;
+  refreshHints(); updateStatus(); updateWallControls(); resize();
+}
+
+function appendChat(msg) {
+  const box = document.getElementById("chatbox");
+  const div = document.createElement("div");
+  div.className = `px-2 py-1 rounded text-xs ${msg.sender.endsWith("_2") ? "text-blue-300" : "text-red-300"}`;
+  div.textContent = `${msg.sender}: ${msg.text}`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+function sendChat() {
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ action: "chat", text }));
+  input.value = "";
 }
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${proto}//${location.host}/ws/${SESSION_ID}`);
-
-  ws.onopen = () => {};
-
   ws.onmessage = (ev) => {
     const data = JSON.parse(ev.data);
     if (data.type === "init") {
       myColor = data.my_color;
       applyState(data.state);
-    } else if (data.type === "update") {
+      (data.state.chat || []).forEach(appendChat);
+    } else if (data.type === "state") {
       applyState(data.state);
+    } else if (data.type === "chat") {
+      appendChat(data.msg);
     } else if (data.type === "error") {
       showError(data.msg);
     }
   };
-
   ws.onclose = () => {
     document.getElementById("status").textContent = "Disconnected — reconnecting...";
     setTimeout(connect, 1500);
   };
-
-  ws.onerror = () => { ws.close(); };
+  ws.onerror = () => ws.close();
 }
 
 function send(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
 }
 
-function endWallTurn() {
-  if (!myColor) return;
-  send({ action: "end_wall_turn", player: myColor });
-}
-function cancelWallTurn() {
-  if (!myColor) return;
-  send({ action: "cancel_wall_turn", player: myColor });
-}
+function endWallTurn()   { send({ action: "end_wall_turn" }); }
+function cancelWallTurn(){ send({ action: "cancel_wall_turn" }); }
 
 canvas.addEventListener("click", (ev) => {
-  if (!state || !myColor || state.winner) return;
-  if (state.turn !== myColor) return;
-
+  if (!state || !myColor || state.winner || state.turn !== myColor) return;
   const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  const x = (ev.clientX - rect.left) * scaleX;
-  const y = (ev.clientY - rect.top) * scaleY;
+  const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (ev.clientY - rect.top)  * (canvas.height / rect.height);
 
   if (mode === "move") {
     const c = Math.floor((x - PAD) / CELL);
     const r = Math.floor((y - PAD) / CELL);
-    const isHint = hints.some(([hr, hc]) => hr === r && hc === c);
-    if (isHint) send({ action: "move", player: myColor, pos: [r, c] });
+    if (hints.some(([hr,hc]) => hr===r && hc===c))
+      send({ action: "move", row: r, col: c });
   } else {
     let best = null, bestDist = Infinity;
     for (const edge of hints) {
-      const [[r1, c1], [r2, c2]] = edge;
-      const [x1, y1] = cellCenter(r1, c1);
-      const [x2, y2] = cellCenter(r2, c2);
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-      const d = Math.hypot(x - mx, y - my);
+      const [[r1,c1],[r2,c2]] = edge;
+      const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
+      const d = Math.hypot(x-(x1+x2)/2, y-(y1+y2)/2);
       if (d < bestDist) { bestDist = d; best = edge; }
     }
-    if (best && bestDist < CELL * 0.5) {
-      send({ action: "wall", player: myColor, w1: best[0], w2: best[1] });
-    }
+    if (best && bestDist < CELL * 0.5)
+      send({ action: "wall", r1: best[0][0], c1: best[0][1], r2: best[1][0], c2: best[1][1] });
   }
 });
 
