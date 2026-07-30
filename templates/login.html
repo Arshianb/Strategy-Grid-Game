@@ -1,0 +1,55 @@
+<!-- templates/login.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategy Game - Login</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
+<div class="bg-slate-700 rounded-2xl shadow-2xl p-8 w-full max-w-sm">
+  <h1 class="text-2xl font-bold text-white text-center mb-6">🎮 Strategy Game</h1>
+  {% if error %}
+  <div class="bg-red-500/20 border border-red-500 text-red-300 rounded-lg p-3 mb-4 text-sm">{{ error }}</div>
+  {% endif %}
+  <form method="post" action="/login" class="space-y-4">
+    <div>
+      <label class="block text-slate-300 text-sm mb-1">Username</label>
+      <input name="username" required
+        class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+    <div>
+      <label class="block text-slate-300 text-sm mb-1">Password</label>
+      <input name="password" type="password" required
+        class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+    <div class="flex gap-3">
+      <div class="flex-1">
+        <label class="block text-slate-300 text-sm mb-1">Rows (5–15)</label>
+        <input name="grid_rows" type="number" value="9" min="5" max="15"
+          class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div class="flex-1">
+        <label class="block text-slate-300 text-sm mb-1">Cols (5–15)</label>
+        <input name="grid_cols" type="number" value="9" min="5" max="15"
+          class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+    <div>
+      <label class="block text-slate-300 text-sm mb-1">Walls per turn</label>
+      <select name="max_walls"
+        class="w-full bg-slate-600 text-white rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="1">1 wall</option>
+        <option value="2" selected>2 walls</option>
+        <option value="3">3 walls</option>
+      </select>
+    </div>
+    <button type="submit"
+      class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg py-2 transition">
+      Login &amp; Create Game
+    </button>
+  </form>
+</div>
+</body>
+</html>
