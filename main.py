@@ -44,6 +44,39 @@ class GameState:
         self.connections = {}    # color -> WebSocket
         self.chat = []           # {sender, text}
 
+    def get_reachable_moves(self, color):
+        pos = self.players[color]
+        r, c = pos["row"], pos["col"]
+        opponent = "blue" if color == "red" else "red"
+        opp = self.players[opponent]
+        blocked = self.existing_wall_keys()
+
+        def wall_between(r1, c1, r2, c2):
+            return self.wall_key(r1, c1, r2, c2) in blocked
+
+        def in_bounds(rr, cc):
+            return 0 <= rr < self.rows and 0 <= cc < self.cols
+
+        moves = []
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nr, nc = r + dr, c + dc
+            if not in_bounds(nr, nc) or wall_between(r, c, nr, nc):
+                continue
+            if nr == opp["row"] and nc == opp["col"]:
+                # Opponent occupies the adjacent cell — attempt jump
+                jr, jc = nr + dr, nc + dc
+                if in_bounds(jr, jc) and not wall_between(nr, nc, jr, jc):
+                    moves.append([jr, jc])                # straight jump
+                else:
+                    # Straight jump blocked (wall or edge) — try diagonal jumps
+                    perp = [(-1, 0), (1, 0)] if dr == 0 else [(0, -1), (0, 1)]
+                    for pdr, pdc in perp:
+                        dr2, dc2 = nr + pdr, nc + pdc
+                        if in_bounds(dr2, dc2) and not wall_between(nr, nc, dr2, dc2):
+                            moves.append([dr2, dc2])
+            else:
+                moves.append([nr, nc])
+        return moves
     def wall_key(self, r1, c1, r2, c2):
         return tuple(sorted([(r1, c1), (r2, c2)]))
 
@@ -140,7 +173,6 @@ async def login(
         "player1_link": f"/game/{sid_red}",
         "player2_link": f"/game/{sid_blue}",
     })
-
 SESSION_TTL = 3600*24*2
 @app.get("/game/{session_id}", response_class=HTMLResponse)
 async def game_page(request: Request, session_id: str):
@@ -185,9 +217,9 @@ async def ws_endpoint(websocket: WebSocket, session_id: str):
             if action == "move":
                 r, c = data["row"], data["col"]
                 pr, pc = game.players[color]["row"], game.players[color]["col"]
-                if abs(r - pr) + abs(c - pc) == 1 and 0 <= r < game.rows and 0 <= c < game.cols:
-                    wk = game.wall_key(pr, pc, r, c)
-                    if wk not in game.existing_wall_keys():
+                if 0 <= r < game.rows and 0 <= c < game.cols:
+                    valid_moves = game.get_reachable_moves(color)
+                    if [r, c] in valid_moves:
                         game.players[color] = {"row": r, "col": c}
                         if r == game.goals[color]:
                             game.winner = color

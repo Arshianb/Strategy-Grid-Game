@@ -263,11 +263,28 @@ function getAllWallEdges() {
 function getMoveHints(pos) {
   const {row: r, col: c} = pos;
   const wallSet = new Set(state.walls.map(w => wallKey([w.r1,w.c1],[w.r2,w.c2])));
+  const wallBetween = (r1,c1,r2,c2) => wallSet.has(wallKey([r1,c1],[r2,c2]));
+  const inBounds = (rr,cc) => rr>=0 && rr<rows && cc>=0 && cc<cols;
+  const opponent = myColor === "red" ? "blue" : "red";
+  const opp = state.players[opponent];
   const result = [];
   for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
     const nr=r+dr, nc=c+dc;
-    if (nr<0||nr>=rows||nc<0||nc>=cols) continue;
-    if (!wallSet.has(wallKey([r,c],[nr,nc]))) result.push([nr,nc]);
+    if (!inBounds(nr,nc) || wallBetween(r,c,nr,nc)) continue;
+    if (nr === opp.row && nc === opp.col) {
+      const jr = nr+dr, jc = nc+dc;
+      if (inBounds(jr,jc) && !wallBetween(nr,nc,jr,jc)) {
+        result.push([jr,jc]);
+      } else {
+        const perp = dr === 0 ? [[-1,0],[1,0]] : [[0,-1],[0,1]];
+        for (const [pdr,pdc] of perp) {
+          const dr2 = nr+pdr, dc2 = nc+pdc;
+          if (inBounds(dr2,dc2) && !wallBetween(nr,nc,dr2,dc2)) result.push([dr2,dc2]);
+        }
+      }
+    } else {
+      result.push([nr,nc]);
+    }
   }
   return result;
 }
@@ -476,7 +493,7 @@ function updateStatus() {
     statusEl.className = "px-4 py-1.5 rounded-full text-sm font-bold glass text-amber-300"; return;
   }
   const isMyTurn = state.turn === myColor;
-  statusEl.textContent = isMyTurn ? "Your turn" : `Waiting for ${state.tun === "red" ? "Red" : "Blue"}`;
+  statusEl.textContent = isMyTurn ? "Your turn" : `Waiting for ${state.turn === "red" ? "Red" : "Blue"}`;
   statusEl.className = `px-4 py-1.5 rounded-full text-sm font-medium glass ${isMyTurn ? "text-green-300" : "text-slate-300"}`;
 }
 
