@@ -2,47 +2,107 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from collections import deque
-import uuid, time, json
+import uuid, time, json, asyncio, os
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-sessions = {}  # session_id -> {game_id, color, username}
+sessions = {}  # session_id -> {game_id, color, username, created}
 games = {}     # game_id -> GameState
 
 PLAYER_COLORS = {"red": "#e74c3c", "blue": "#3498db"}
 WALL_COLORS   = {"red": "#c0392b", "blue": "#2980b9"}
 
+SESSION_TTL   = 3600 * 24   # 24h  — remove from file storage
+RAM_TTL       = 3600        # 1h   — evict from RAM
+
+SESSIONS_FILE = "sessions_store.json"
+
+# ── persistence helpers ────────────────────────────────────────────────────────
+
+def _load_sessions_from_disk():
+    """Load non-expired sessions from file into RAM on startup."""
+    if not os.path.exists(SESSIONS_FILE):
+        return
+    try:
+        with open(SESSIONS_FILE) as f:
+            data = json.load(f)
+        now = time.time()
+        for sid, s in data.items():
+            if now - s["created"] < SESSION_TTL:
+                sessions[sid] = s
+    except Exception:
+        pass
+
+def _save_sessions_to_disk():
+    """Persist all in-memory sessions to file."""
+    try:
+        with open(SESSIONS_FILE, "w") as f:
+            json.dump(sessions, f)
+    except Exception:
+        pass
+
+def _flush_expired_from_disk():
+    """Remove sessions older than SESSION_TTL (24h) from the file."""
+    if not os.path.exists(SESSIONS_FILE):
+        return
+    try:
+        with open(SESSIONS_FILE) as f:
+            data = json.load(f)
+        now = time.time()
+        cleaned = {sid: s for sid, s in data.items() if now - s["created"] < SESSION_TTL}
+        with open(SESSIONS_FILE, "w") as f:
+            json.dump(cleaned, f)
+    except Exception:
+        pass
+
+# ── background cleanup task ────────────────────────────────────────────────────
+
+async def _cleanup_loop():
+    """Every hour: evict sessions older than 1h from RAM; purge >24h from disk."""
+    while True:
+        await asyncio.sleep(RAM_TTL)
+        now = time.time()
+        expired_ram = [sid for sid, s in sessions.items() if now - s["created"] > RAM_TTL]
+        for sid in expired_ram:
+            sessions.pop(sid, None)
+        _flush_expired_from_disk()
+
+@app.on_event("startup")
+async def startup():
+    _load_sessions_from_disk()
+    asyncio.create_task(_cleanup_loop())
+
+# ── GameState ──────────────────────────────────────────────────────────────────
+
 class GameState:
     def __init__(self, rows, cols, max_walls, mode, wall_limit=None):
-        self.wall_limit = wall_limit          # None = unlimited
+        self.wall_limit = wall_limit
         self.walls_used = {"red": 0, "blue": 0}
         self.rows = rows
         self.cols = cols
         self.max_walls = max_walls
-        self.mode = mode  # "same" or "opposite"
+        self.mode = mode
         mid = cols // 2
         if mode == "same":
-            # both start bottom row, side by side
             self.players = {
                 "red":  {"row": rows - 1, "col": max(0, mid - 1)},
                 "blue": {"row": rows - 1, "col": min(cols - 1, mid + 1)},
             }
             self.goals = {"red": 0, "blue": 0}
         else:
-            # opposite sides
             self.players = {
                 "red":  {"row": rows - 1, "col": mid},
                 "blue": {"row": 0,        "col": mid},
             }
             self.goals = {"red": 0, "blue": rows - 1}
         self.turn = "red"
-        self.walls = []          # each: {r1,c1,r2,c2,owner}
+        self.walls = []
         self.pending_walls = []
         self.pending_direction = None
         self.winner = None
-        self.connections = {}    # color -> WebSocket
-        self.chat = []           # {sender, text}
+        self.connections = {}
+        self.chat = []
 
     def get_reachable_moves(self, color):
         pos = self.players[color]
@@ -63,12 +123,10 @@ class GameState:
             if not in_bounds(nr, nc) or wall_between(r, c, nr, nc):
                 continue
             if nr == opp["row"] and nc == opp["col"]:
-                # Opponent occupies the adjacent cell — attempt jump
                 jr, jc = nr + dr, nc + dc
                 if in_bounds(jr, jc) and not wall_between(nr, nc, jr, jc):
-                    moves.append([jr, jc])                # straight jump
+                    moves.append([jr, jc])
                 else:
-                    # Straight jump blocked (wall or edge) — try diagonal jumps
                     perp = [(-1, 0), (1, 0)] if dr == 0 else [(0, -1), (0, 1)]
                     for pdr, pdc in perp:
                         dr2, dc2 = nr + pdr, nc + pdc
@@ -77,6 +135,7 @@ class GameState:
             else:
                 moves.append([nr, nc])
         return moves
+
     def wall_key(self, r1, c1, r2, c2):
         return tuple(sorted([(r1, c1), (r2, c2)]))
 
@@ -123,6 +182,8 @@ class GameState:
             "chat": self.chat[-50:],
         }
 
+# ── routes ─────────────────────────────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("login.html", {"request": request, "error": None})
@@ -153,7 +214,7 @@ async def login(
                     valid = True
                     break
     except FileNotFoundError:
-        valid = True  # dev fallback
+        valid = True
 
     if not valid:
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
@@ -167,13 +228,15 @@ async def login(
     sessions[sid_red]  = {"game_id": game_id, "color": "red",  "username": username,        "created": now}
     sessions[sid_blue] = {"game_id": game_id, "color": "blue", "username": username + "_2", "created": now}
 
+    _save_sessions_to_disk()   # persist new sessions immediately
+
     return templates.TemplateResponse("login.html", {
         "request": request,
         "error": None,
         "player1_link": f"/game/{sid_red}",
         "player2_link": f"/game/{sid_blue}",
     })
-SESSION_TTL = 3600*24*2
+
 @app.get("/game/{session_id}", response_class=HTMLResponse)
 async def game_page(request: Request, session_id: str):
     s = sessions.get(session_id)
@@ -181,13 +244,17 @@ async def game_page(request: Request, session_id: str):
         return RedirectResponse("/")
     return templates.TemplateResponse("game.html", {"request": request, "session_id": session_id})
 
+# ── websocket ──────────────────────────────────────────────────────────────────
+
 @app.websocket("/ws/{session_id}")
 async def ws_endpoint(websocket: WebSocket, session_id: str):
     s = sessions.get(session_id)
     if not s:
         await websocket.close(); return
     await websocket.accept()
-    game = games[s["game_id"]]
+    game = games.get(s["game_id"])
+    if not game:
+        await websocket.close(); return
     color = s["color"]
     game.connections[color] = websocket
 
@@ -252,7 +319,7 @@ async def ws_endpoint(websocket: WebSocket, session_id: str):
                 if 0 < len(game.pending_walls) <= game.max_walls:
                     for w in game.pending_walls:
                         game.walls.append({"r1":w[0],"c1":w[1],"r2":w[2],"c2":w[3],"owner":color})
-                    game.walls_used[color] += len(game.pending_walls)  # ← outside the loop
+                    game.walls_used[color] += len(game.pending_walls)
                     game.pending_walls = []
                     game.pending_direction = None
                     game.turn = "blue" if color == "red" else "red"
