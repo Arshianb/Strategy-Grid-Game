@@ -14,7 +14,9 @@ PLAYER_COLORS = {"red": "#e74c3c", "blue": "#3498db"}
 WALL_COLORS   = {"red": "#c0392b", "blue": "#2980b9"}
 
 class GameState:
-    def __init__(self, rows, cols, max_walls, mode):
+    def __init__(self, rows, cols, max_walls, mode, wall_limit=None):
+        self.wall_limit = wall_limit          # None = unlimited
+        self.walls_used = {"red": 0, "blue": 0}
         self.rows = rows
         self.cols = cols
         self.max_walls = max_walls
@@ -83,6 +85,8 @@ class GameState:
             "max_walls": self.max_walls,
             "player_colors": PLAYER_COLORS,
             "wall_colors": WALL_COLORS,
+            "wall_limit": self.wall_limit,
+            "walls_used": self.walls_used,
             "chat": self.chat[-50:],
         }
 
@@ -99,10 +103,13 @@ async def login(
     cols: int = Form(9),
     max_walls: int = Form(1),
     game_mode: str = Form("opposite"),
+    wall_limit_enabled: str = Form(None),
+    total_walls: int = Form(10),
 ):
     rows = max(5, min(15, rows))
     cols = max(5, min(15, cols))
     max_walls = max(1, min(5, max_walls))
+    wall_limit = max(1, min(50, total_walls)) if wall_limit_enabled else None
 
     valid = False
     try:
@@ -119,7 +126,7 @@ async def login(
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
 
     game_id = str(uuid.uuid4())
-    games[game_id] = GameState(rows, cols, max_walls, game_mode)
+    games[game_id] = GameState(rows, cols, max_walls, game_mode, wall_limit)
 
     sid_red  = str(uuid.uuid4())
     sid_blue = str(uuid.uuid4())
@@ -134,10 +141,11 @@ async def login(
         "player2_link": f"/game/{sid_blue}",
     })
 
+SESSION_TTL = 3600*24*2
 @app.get("/game/{session_id}", response_class=HTMLResponse)
 async def game_page(request: Request, session_id: str):
     s = sessions.get(session_id)
-    if not s or time.time() - s["created"] > 172800:
+    if not s or time.time() - s["created"] > SESSION_TTL:
         return RedirectResponse("/")
     return templates.TemplateResponse("game.html", {"request": request, "session_id": session_id})
 
@@ -195,17 +203,24 @@ async def ws_endpoint(websocket: WebSocket, session_id: str):
                 wk = game.wall_key(r1,c1,r2,c2)
                 if wk in game.existing_wall_keys(): continue
                 if any(game.wall_key(w[0],w[1],w[2],w[3]) == wk for w in game.pending_walls): continue
+                if game.wall_limit is not None:
+                    used = game.walls_used[color]
+                    pending_count = len(game.pending_walls)
+                    if used + pending_count + 1 > game.wall_limit:
+                        continue
                 new_pending = game.pending_walls + [[r1,c1,r2,c2]]
                 if not game.path_exists("red", new_pending) or not game.path_exists("blue", new_pending):
+                    await websocket.send_json({"type": "error", "msg": "Wall would block a player's path!"})
                     continue
                 game.pending_walls = new_pending
                 game.pending_direction = direction
                 await broadcast({"type": "state", "state": game.to_dict()})
 
             elif action == "end_wall_turn":
-                if len(game.pending_walls) == game.max_walls:
+                if 0 < len(game.pending_walls) <= game.max_walls:
                     for w in game.pending_walls:
                         game.walls.append({"r1":w[0],"c1":w[1],"r2":w[2],"c2":w[3],"owner":color})
+                    game.walls_used[color] += len(game.pending_walls)  # ← outside the loop
                     game.pending_walls = []
                     game.pending_direction = None
                     game.turn = "blue" if color == "red" else "red"

@@ -13,9 +13,21 @@
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
   }
-  canvas { touch-action: none; display: block; max-width: 100%; background: #1e293b; }
+  canvas {
+    touch-action: none;
+    display: block;
+    max-width: 100%;
+    image-rendering: -webkit-optimize-contrast;
+  }
   .glass { background: rgba(30,41,59,0.55); backdrop-filter: blur(10px); border: 1px solid rgba(148,163,184,0.15); }
   .btn-press:active { transform: scale(0.94); }
+  #boardWrap {
+    border-radius: 1.25rem;
+    padding: 10px;
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    box-shadow: 0 20px 40px -12px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+    border: 1px solid rgba(148,163,184,0.15);
+  }
 
   /* Chat modal */
   #chatModal {
@@ -87,7 +99,7 @@
 <div id="wallInfo" class="hidden text-amber-300 text-xs text-center"></div>
 
 <!-- Canvas -->
-<div class="rounded-2xl glass shadow-2xl overflow-hidden">
+<div id="boardWrap">
   <canvas id="board" class="rounded-xl cursor-pointer"></canvas>
 </div>
 
@@ -119,19 +131,30 @@ let state = null, myColor = null;
 let rows = 9, cols = 9, maxWalls = 1;
 let mode = "move", hints = [];
 let CELL = 52, PAD = 20;
+let cssW = 0, cssH = 0, DPR = 1;
 let ws = null;
 let unreadChat = 0, chatOpen = false;
+let pulse = 0;
 
 function computeCell() {
-  const maxW = Math.min(window.innerWidth - 24, 600);
-  CELL = Math.max(28, Math.floor((maxW - PAD * 2) / Math.max(rows, cols)));
+  const maxW = Math.min(window.innerWidth - 44, 560);
+  CELL = Math.max(30, Math.floor((maxW - PAD * 2) / Math.max(rows, cols)));
 }
+
 function resize() {
   computeCell();
-  canvas.width  = PAD * 2 + CELL * cols;
-  canvas.height = PAD * 2 + CELL * rows;
-  canvas.style.width  = canvas.width  + "px";
-  canvas.style.height = canvas.height + "px";
+  DPR = window.devicePixelRatio || 1;
+  cssW = PAD * 2 + CELL * cols;
+  cssH = PAD * 2 + CELL * rows;
+
+  // Fix blurriness: back-store canvas at real device pixel density
+  canvas.width  = Math.round(cssW * DPR);
+  canvas.height = Math.round(cssH * DPR);
+  canvas.style.width  = cssW + "px";
+  canvas.style.height = cssH + "px";
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.imageSmoothingEnabled = true;
   draw();
 }
 window.addEventListener("resize", resize);
@@ -185,6 +208,10 @@ function refreshHints() {
 function updateWallControls() {
   const wallCtrl = document.getElementById("wallControls");
   const wallInfo = document.getElementById("wallInfo");
+  const exhausted = state.wall_limit != null &&
+    (state.walls_used?.[myColor] ?? 0) >= state.wall_limit;
+  document.getElementById("btnWall").disabled = exhausted;
+  document.getElementById("btnWall").classList.toggle("opacity-40", exhausted);
   if (!state || mode !== "wall" || state.turn !== myColor) {
     wallCtrl.classList.add("hidden"); wallCtrl.classList.remove("flex");
     wallInfo.classList.add("hidden"); return;
@@ -196,9 +223,13 @@ function updateWallControls() {
   btn.classList.toggle("opacity-40", !hasPending);
   wallInfo.classList.remove("hidden");
   const dir = state.pending_direction;
+  const remaining = state.wall_limit != null
+    ? ` (${state.wall_limit - (state.walls_used?.[myColor] ?? 0)} left)`
+    : "";
   wallInfo.textContent = dir
     ? `Placed ${state.pending_walls.length}/${maxWalls} walls (${dir === "h" ? "horizontal" : "vertical"}) — must continue same direction`
-    : `Place up to ${maxWalls} wall${maxWalls > 1 ? "s" : ""} in one direction`;
+    : `Place up to ${maxWalls} wall${maxWalls > 1 ? "s" : ""} in one direction${remaining}`;
+
 }
 
 function cellCenter(r, c) {
@@ -241,77 +272,198 @@ function getMoveHints(pos) {
   return result;
 }
 
-const WALL_COLORS = { red: "#c0392b", blue: "#2980b9" };
-const PLAYER_COLORS = { red: "#ef4444", blue: "#3b82f6" };
+const PLAYER_COLORS = {
+  red:  { main: "#ef4444", light: "#fca5a5", dark: "#991b1b", ring: "#4ade80" },
+  blue: { main: "#3b82f6", light: "#93c5fd", dark: "#1e3a8a", ring: "#4ade80" }
+};
+const WALL_COLORS = { red: "#dc2626", blue: "#2563eb" };
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "#1e293b";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!state) return;
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
 
-  ctx.strokeStyle = "#334155"; ctx.lineWidth = 1;
+function drawBoardBackground() {
+  // outer board bg
+  const g = ctx.createLinearGradient(0, 0, 0, cssH);
+  g.addColorStop(0, "#243147");
+  g.addColorStop(1, "#111a2e");
+  ctx.fillStyle = g;
+  roundRect(0, 0, cssW, cssH, 16);
+  ctx.fill();
+
+  // checkerboard cells
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = PAD + c * CELL, y = PAD + r * CELL;
+      ctx.fillStyle = (r + c) % 2 === 0 ? "rgba(255,255,255,0.035)" : "rgba(0,0,0,0.10)";
+      ctx.fillRect(x, y, CELL, CELL);
+    }
+  }
+
+  // goal zones
+  for (const [color, goalRow] of Object.entries(state.goals)) {
+    const c = PLAYER_COLORS[color];
+    const y = PAD + goalRow * CELL;
+    const grad = ctx.createLinearGradient(0, y, 0, y + CELL);
+    grad.addColorStop(0, c.main + "33");
+    grad.addColorStop(1, c.main + "0d");
+    ctx.fillStyle = grad;
+    ctx.fillRect(PAD, y, cols * CELL, CELL);
+    ctx.fillStyle = c.main;
+    ctx.font = `700 ${Math.max(11, CELL * 0.24)}px system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.globalAlpha = 0.85;
+    ctx.fillText(color === "red" ? "🔴 GOAL" : "🔵 GOAL", PAD + cols * CELL / 2, y + CELL / 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // crisp grid lines (aligned to half-pixel for sharpness)
+  ctx.strokeStyle = "rgba(148,163,184,0.25)";
+  ctx.lineWidth = 1;
   for (let i = 0; i <= cols; i++) {
-    const x = PAD + i * CELL;
+    const x = Math.round(PAD + i * CELL) + 0.5;
     ctx.beginPath(); ctx.moveTo(x, PAD); ctx.lineTo(x, PAD + rows * CELL); ctx.stroke();
   }
   for (let i = 0; i <= rows; i++) {
-    const y = PAD + i * CELL;
+    const y = Math.round(PAD + i * CELL) + 0.5;
     ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(PAD + cols * CELL, y); ctx.stroke();
   }
+}
 
-  for (const [color, goalRow] of Object.entries(state.goals)) {
-    ctx.fillStyle = color === "red" ? "rgba(239,68,68,0.12)" : "rgba(59,130,246,0.12)";
-    ctx.fillRect(PAD, PAD + goalRow * CELL, cols * CELL, CELL);
-    ctx.fillStyle = color === "red" ? "#ef4444" : "#3b82f6";
-    ctx.font = `${Math.max(10, CELL * 0.22)}px sans-serif`;
-    ctx.textAlign = "center";
-    ctx.fillText(color === "red" ? "🔴 Goal" : "🔵 Goal", PAD + cols * CELL / 2, PAD + goalRow * CELL + CELL / 2 + 4);
+function drawMoveHints() {
+  ctx.save();
+  for (const [r,c] of hints) {
+    const x = PAD + c * CELL, y = PAD + r * CELL;
+    const [cx, cy] = cellCenter(r, c);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, CELL * 0.42);
+    grad.addColorStop(0, "rgba(96,165,250,0.55)");
+    grad.addColorStop(1, "rgba(96,165,250,0.05)");
+    ctx.fillStyle = grad;
+    roundRect(x + 3, y + 3, CELL - 6, CELL - 6, 8);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(147,197,253,0.6)";
+    ctx.lineWidth = 1.5;
+    roundRect(x + 3, y + 3, CELL - 6, CELL - 6, 8);
+    ctx.stroke();
   }
+  ctx.restore();
+}
 
-  if (mode === "move") {
-    ctx.fillStyle = "rgba(96,165,250,0.35)";
-    for (const [r,c] of hints) ctx.fillRect(PAD+c*CELL+3, PAD+r*CELL+3, CELL-6, CELL-6);
-  }
-  if (mode === "wall") {
-    for (const [[r1,c1],[r2,c2]] of hints) {
-      const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
-      const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.4, dy=(x2-x1)*0.4;
-      ctx.strokeStyle = "rgba(251,191,36,0.28)";
-      ctx.lineWidth = Math.max(4, CELL*0.12); ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
-    }
-  }
+function drawWallLine(r1,c1,r2,c2, color, alpha, dashed, glow) {
+  const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
+  const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.42, dy=(x2-x1)*0.42;
+  const w = Math.max(6, CELL * 0.16);
 
-  for (const [r1,c1,r2,c2] of (state.pending_walls || [])) {
-    const [x1,y1] = cellCenter(r1,c1), [x2,y2] = cellCenter(r2,c2);
-    const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.45, dy=(x2-x1)*0.45;
-    ctx.strokeStyle = "rgba(251,191,36,0.75)";
-    ctx.lineWidth = Math.max(4, CELL*0.1); ctx.lineCap = "round";
-    ctx.setLineDash([6,4]);
-    ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
-    ctx.setLineDash([]);
+  ctx.save();
+  if (glow) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
   }
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = w;
+  ctx.lineCap = "round";
+  if (dashed) ctx.setLineDash([6,5]);
+  ctx.beginPath();
+  ctx.moveTo(mx-dx,my-dy);
+  ctx.lineTo(mx+dx,my+dy);
+  ctx.stroke();
+  ctx.restore();
+}
 
-  ctx.lineWidth = Math.max(4, CELL*0.1); ctx.lineCap = "round";
-  for (const w of state.walls) {
-    const [x1,y1] = cellCenter(w.r1,w.c1), [x2,y2] = cellCenter(w.r2,w.c2);
-    const mx=(x1+x2)/2, my=(y1+y2)/2, dx=(y2-y1)*0.45, dy=(x2-x1)*0.45;
-    ctx.strokeStyle = WALL_COLORS[w.owner] || "#f59e0b";
-    ctx.beginPath(); ctx.moveTo(mx-dx,my-dy); ctx.lineTo(mx+dx,my+dy); ctx.stroke();
-  }
-
-  for (const [color, pos] of Object.entries(state.players)) {
-    const [x,y] = cellCenter(pos.row, pos.col);
-    ctx.beginPath(); ctx.arc(x,y,CELL*0.33,0,Math.PI*2);
-    ctx.fillStyle = PLAYER_COLORS[color]; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = "#0f172a"; ctx.stroke();
-    if (state.turn === color && !state.winner) {
-      ctx.beginPath(); ctx.arc(x,y,CELL*0.42,0,Math.PI*2);
-      ctx.strokeStyle = "#4ade80"; ctx.lineWidth = 2; ctx.stroke();
-    }
+function drawWallHints() {
+  for (const [[r1,c1],[r2,c2]] of hints) {
+    drawWallLine(r1,c1,r2,c2, "#fbbf24", 0.25, false, false);
   }
 }
+
+function drawPendingWalls() {
+  for (const [r1,c1,r2,c2] of (state.pending_walls || [])) {
+    drawWallLine(r1,c1,r2,c2, "#fbbf24", 0.9, true, true);
+  }
+}
+
+function drawPlacedWalls() {
+  for (const w of state.walls) {
+    const col = WALL_COLORS[w.owner] || "#f59e0b";
+    drawWallLine(w.r1, w.c1, w.r2, w.c2, col, 1, false, false);
+  }
+}
+
+function drawPlayers() {
+  for (const [color, pos] of Object.entries(state.players)) {
+    const [x,y] = cellCenter(pos.row, pos.col);
+    const c = PLAYER_COLORS[color];
+    const R = CELL * 0.34;
+
+    // turn glow ring (pulsing)
+    if (state.turn === color && !state.winner) {
+      const pr = R + 6 + Math.sin(pulse) * 2;
+      ctx.save();
+      ctx.strokeStyle = c.ring;
+      ctx.lineWidth = 2.5;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(x, y, pr, 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+
+    // drop shadow
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.5)";
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+
+    // 3D sphere piece
+    const grad = ctx.createRadialGradient(x - R*0.35, y - R*0.35, R*0.15, x, y, R);
+    grad.addColorStop(0, c.light);
+    grad.addColorStop(0.5, c.main);
+    grad.addColorStop(1, c.dark);
+    ctx.beginPath();
+    ctx.arc(x, y, R, 0, Math.PI*2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(15,23,42,0.6)";
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI*2); ctx.stroke();
+
+    // small highlight dot
+    ctx.beginPath();
+    ctx.arc(x - R*0.35, y - R*0.35, R*0.22, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.fill();
+  }
+}
+
+function draw() {
+  if (!state) {
+    ctx.clearRect(0, 0, cssW, cssH);
+    return;
+  }
+  ctx.clearRect(0, 0, cssW, cssH);
+  drawBoardBackground();
+  if (mode === "move") drawMoveHints();
+  if (mode === "wall") drawWallHints();
+  drawPendingWalls();
+  drawPlacedWalls();
+  drawPlayers();
+}
+
+// smooth pulsing animation loop for turn indicator
+function animate() {
+  pulse += 0.06;
+  if (state && !state.winner) draw();
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
 
 function updateStatus() {
   const statusEl = document.getElementById("status");
@@ -324,7 +476,7 @@ function updateStatus() {
     statusEl.className = "px-4 py-1.5 rounded-full text-sm font-bold glass text-amber-300"; return;
   }
   const isMyTurn = state.turn === myColor;
-  statusEl.textContent = isMyTurn ? "Your turn" : `Waiting for ${state.turn === "red" ? "Red" : "Blue"}`;
+  statusEl.textContent = isMyTurn ? "Your turn" : `Waiting for ${state.tun === "red" ? "Red" : "Blue"}`;
   statusEl.className = `px-4 py-1.5 rounded-full text-sm font-medium glass ${isMyTurn ? "text-green-300" : "text-slate-300"}`;
 }
 
@@ -403,8 +555,11 @@ function cancelWallTurn() { send({ action: "cancel_wall_turn" }); }
 canvas.addEventListener("click", (ev) => {
   if (!state || !myColor || state.winner || state.turn !== myColor) return;
   const rect = canvas.getBoundingClientRect();
-  const x = (ev.clientX - rect.left) * (canvas.width / rect.width);
-  const y = (ev.clientY - rect.top)  * (canvas.height / rect.height);
+  // rect.width/height are CSS pixels — matches our logical coordinate space (PAD/CELL),
+  // so no extra DPR scaling is needed here.
+  const x = ev.clientX - rect.left;
+  const y = ev.clientY - rect.top;
+
   if (mode === "move") {
     const c = Math.floor((x - PAD) / CELL);
     const r = Math.floor((y - PAD) / CELL);

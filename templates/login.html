@@ -52,15 +52,31 @@
     </div>
     <div>
       <label class="block text-sm text-gray-400 mb-2">Game Mode</label>
-      <div class="grid grid-cols-2 gap-3">
-        <label class="flex items-center gap-2 bg-gray-700 rounded p-3 cursor-pointer hover:bg-gray-600">
-          <input type="radio" name="game_mode" value="opposite" checked class="accent-blue-500">
-          <span class="text-sm">Opposite Sides</span>
+      <div class="col-span-3">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="wallLimitToggle" name="wall_limit_enabled" value="1"
+            class="accent-blue-500 w-4 h-4"
+            onchange="document.getElementById('totalWallsWrap').classList.toggle('hidden', !this.checked)">
+          <span class="text-sm text-gray-400">Limit total walls per player</span>
         </label>
-        <label class="flex items-center gap-2 bg-gray-700 rounded p-3 cursor-pointer hover:bg-gray-600">
-          <input type="radio" name="game_mode" value="same" class="accent-blue-500">
-          <span class="text-sm">Same Side</span>
-        </label>
+      </div>
+      <div id="totalWallsWrap" class="hidden col-span-3">
+        <label class="block text-sm text-gray-400 mb-1">Total Walls per Player</label>
+        <input name="total_walls" type="number" value="10" min="1" max="50"
+          class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm text-gray-400 mb-2">Game Mode</label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="flex items-center gap-2 bg-gray-700 rounded p-3 cursor-pointer hover:bg-gray-600">
+            <input type="radio" name="game_mode" value="opposite" checked class="accent-blue-500">
+            <span class="text-sm">Opposite Sides</span>
+          </label>
+          <label class="flex items-center gap-2 bg-gray-700 rounded p-3 cursor-pointer hover:bg-gray-600">
+            <input type="radio" name="game_mode" value="same" class="accent-blue-500">
+            <span class="text-sm">Same Side</span>
+          </label>
+        </div>
       </div>
     </div>
     <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 rounded py-2 font-semibold transition">Create Game</button>
